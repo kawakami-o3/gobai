@@ -29,24 +29,24 @@ check-rust: ## Rust コンパイルチェック (cargo check)
 
 check: typecheck check-rust ## typecheck + check-rust
 
-lint-frontend: ## (placeholder) eslint 未設定
-	@echo "[lint-frontend] eslint not configured yet (TODO: 01-project-setup/06-lint-format)"
+lint-frontend: ## eslint で frontend を lint
+	bun run lint
 
 lint-rust: ## clippy で Rust を lint (-D warnings)
 	cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
 
 lint: lint-frontend lint-rust ## frontend + rust の lint
 
-fmt-frontend: ## (placeholder) prettier 未設定
-	@echo "[fmt-frontend] prettier not configured yet (TODO: 01-project-setup/06-lint-format)"
+fmt-frontend: ## prettier で frontend を整形
+	bun run format
 
 fmt-rust: ## rustfmt で Rust を整形
 	cd src-tauri && cargo fmt --all
 
 fmt: fmt-frontend fmt-rust ## frontend + rust の整形
 
-fmt-check-frontend: ## (placeholder) prettier --check 未設定
-	@echo "[fmt-check-frontend] prettier not configured yet (TODO: 01-project-setup/06-lint-format)"
+fmt-check-frontend: ## prettier で整形差分を検査
+	bun run format:check
 
 fmt-check-rust: ## rustfmt で整形差分を検査
 	cd src-tauri && cargo fmt --all -- --check

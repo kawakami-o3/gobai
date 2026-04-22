@@ -1,0 +1,12 @@
+pre-commit:
+  parallel: true
+  commands:
+    rustfmt:
+      glob: "src-tauri/**/*.rs"
+      run: cd src-tauri && cargo fmt -- --check
+    prettier:
+      glob: "*.{ts,tsx,js,jsx,json,md,yml,yaml,html,css}"
+      run: bun x prettier --check {staged_files}
+    eslint:
+      glob: "*.{ts,tsx,js,jsx}"
+      run: bun x eslint {staged_files}

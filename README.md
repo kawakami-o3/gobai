@@ -24,6 +24,12 @@ make install # 依存をインストール
 make dev     # tauri dev (動的ポート選択)
 ```
 
+## Lint / Format
+
+- Frontend: eslint + prettier、Rust: rustfmt + clippy
+- 一括実行: `make lint` (eslint + clippy) / `make fmt` (整形) / `make fmt-check` (差分検査)
+- pre-commit フックは **lefthook** を採用。`bun install` 時に `prepare` script が `lefthook install` を実行し、`.git/hooks/pre-commit` に rustfmt --check / prettier --check / eslint が登録される (重い clippy は CI 側で担保)
+
 ## ライセンス
 
 [MIT License](./LICENSE)

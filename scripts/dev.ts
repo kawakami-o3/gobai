@@ -36,7 +36,7 @@ async function findFreePort(): Promise<number> {
     }
   }
   throw new Error(
-    `No free port found in range ${BASE_PORT}-${BASE_PORT + MAX_ATTEMPTS * PORT_STEP}`
+    `No free port found in range ${BASE_PORT}-${BASE_PORT + MAX_ATTEMPTS * PORT_STEP}`,
   );
 }
 
@@ -50,10 +50,14 @@ const configOverride = JSON.stringify({
   },
 });
 
-const child = spawn("bun", ["run", "tauri", "dev", "--config", configOverride], {
-  stdio: "inherit",
-  env: process.env,
-});
+const child = spawn(
+  "bun",
+  ["run", "tauri", "dev", "--config", configOverride],
+  {
+    stdio: "inherit",
+    env: process.env,
+  },
+);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => child.kill(signal));
