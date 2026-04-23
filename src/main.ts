@@ -30,4 +30,14 @@ window.addEventListener("DOMContentLoaded", async () => {
       storageEl.textContent = `ストレージエラー: ${e}`;
     }
   }
+
+  const dbEl = document.querySelector("#db-status");
+  if (dbEl) {
+    try {
+      const status = await invoke<string>("get_db_status");
+      dbEl.textContent = `db status: ${status}`;
+    } catch (e) {
+      dbEl.textContent = `DB エラー: ${e}`;
+    }
+  }
 });
