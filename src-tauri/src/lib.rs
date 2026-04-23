@@ -34,11 +34,20 @@ fn get_storage_paths(state: State<StorageState>) -> Result<StoragePaths, String>
 #[tauri::command]
 async fn get_db_status(state: State<'_, DbState>) -> Result<String, String> {
     let pool = state.0.as_ref().map_err(|e| e.clone())?.clone();
-    let row: (i32,) = sqlx::query_as("SELECT 1")
-        .fetch_one(&pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(format!("connected (SELECT 1 -> {})", row.0))
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT name FROM sqlite_master \
+         WHERE type='table' AND name NOT LIKE '\\_%' ESCAPE '\\' \
+         ORDER BY name",
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let names: Vec<String> = rows.into_iter().map(|t| t.0).collect();
+    Ok(format!(
+        "connected ({} tables: {})",
+        names.len(),
+        names.join(", ")
+    ))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

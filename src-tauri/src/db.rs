@@ -30,7 +30,8 @@ impl std::error::Error for DbError {
 pub async fn init_pool(db_path: &Path) -> Result<SqlitePool, DbError> {
     let opts = SqliteConnectOptions::new()
         .filename(db_path)
-        .create_if_missing(true);
+        .create_if_missing(true)
+        .foreign_keys(true);
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(opts)
@@ -45,7 +46,12 @@ pub async fn init_pool(db_path: &Path) -> Result<SqlitePool, DbError> {
 
 #[cfg(test)]
 pub async fn init_in_memory_pool() -> Result<SqlitePool, DbError> {
-    let pool = SqlitePool::connect("sqlite::memory:")
+    use std::str::FromStr;
+    let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+        .map_err(DbError::Connect)?
+        .foreign_keys(true);
+    let pool = SqlitePoolOptions::new()
+        .connect_with(opts)
         .await
         .map_err(DbError::Connect)?;
     sqlx::migrate!("./migrations")
@@ -82,6 +88,34 @@ mod tests {
         assert!(path.exists());
 
         let row: (i32,) = sqlx::query_as("SELECT 1").fetch_one(&pool).await.unwrap();
+        assert_eq!(row.0, 1);
+    }
+
+    #[tokio::test]
+    async fn migration_creates_core_state_tables() {
+        let pool = init_in_memory_pool().await.unwrap();
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT name FROM sqlite_master \
+             WHERE type='table' AND name NOT LIKE '\\_%' ESCAPE '\\' \
+             ORDER BY name",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let names: Vec<String> = rows.into_iter().map(|t| t.0).collect();
+        assert_eq!(
+            names,
+            vec!["phase_runs", "subtasks", "task_state_log", "tasks"]
+        );
+    }
+
+    #[tokio::test]
+    async fn foreign_keys_pragma_is_enabled() {
+        let pool = init_in_memory_pool().await.unwrap();
+        let row: (i32,) = sqlx::query_as("PRAGMA foreign_keys")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(row.0, 1);
     }
 }
