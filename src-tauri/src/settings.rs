@@ -2,6 +2,7 @@ use figment::providers::{Env, Format, Toml};
 use figment::Figment;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 pub const ENV_VAR: &str = "GOBAI_CONFIG";
@@ -173,18 +174,171 @@ pub struct Settings {
     pub ui: UiSettings,
 }
 
-/// Load `Settings` by merging (in order): TOML file (if discovered) and env vars.
+/// Errors surfaced by `validate`. Aggregated and returned together so callers
+/// can show every problem to the user in one shot rather than fix-and-retry.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValidationError {
+    NonPositive {
+        field: &'static str,
+        value: String,
+    },
+    OutOfRange {
+        field: &'static str,
+        value: String,
+        min: f64,
+        max: f64,
+    },
+    InvalidRegex {
+        field: &'static str,
+        index: usize,
+        pattern: String,
+        reason: String,
+    },
+}
+
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NonPositive { field, value } => {
+                write!(f, "{field} は正の値である必要があります (現在: {value})")
+            }
+            Self::OutOfRange {
+                field,
+                value,
+                min,
+                max,
+            } => write!(
+                f,
+                "{field} は {min} 以上 {max} 以下である必要があります (現在: {value})"
+            ),
+            Self::InvalidRegex {
+                field,
+                index,
+                pattern,
+                reason,
+            } => write!(
+                f,
+                "{field}[{index}] の正規表現がコンパイルできません (\"{pattern}\"): {reason}"
+            ),
+        }
+    }
+}
+
+/// Combined error type for the load → validate pipeline.
+#[derive(Debug)]
+pub enum SettingsError {
+    Load(figment::Error),
+    Validation(Vec<ValidationError>),
+}
+
+impl fmt::Display for SettingsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Load(e) => write!(f, "設定ファイルの読み込みに失敗しました: {e}"),
+            Self::Validation(errs) => {
+                writeln!(f, "設定値が不正です:")?;
+                for e in errs {
+                    writeln!(f, "  - {e}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for SettingsError {}
+
+impl From<figment::Error> for SettingsError {
+    fn from(e: figment::Error) -> Self {
+        Self::Load(e)
+    }
+}
+
+/// Validate semantic constraints not expressible by serde/figment alone.
+///
+/// Errors are collected (not short-circuited) so all problems can be reported
+/// to the user at once. Enum-typed fields (e.g. `confirm_level`) are already
+/// constrained at deserialization time and need no checks here.
+pub fn validate(s: &Settings) -> Result<(), Vec<ValidationError>> {
+    let mut errors = Vec::new();
+
+    let positives_u32: &[(&'static str, u32)] = &[
+        ("loop.design_max", s.loop_.design_max),
+        ("loop.impl_max", s.loop_.impl_max),
+        ("loop.cli_failure_max", s.loop_.cli_failure_max),
+        ("loop.extension_step", s.loop_.extension_step),
+        ("cost.max_api_calls_per_task", s.cost.max_api_calls_per_task),
+        ("log.task_size_limit_mb", s.log.task_size_limit_mb),
+        ("log.global_soft_limit_gb", s.log.global_soft_limit_gb),
+    ];
+    for (field, value) in positives_u32 {
+        if *value == 0 {
+            errors.push(ValidationError::NonPositive {
+                field,
+                value: value.to_string(),
+            });
+        }
+    }
+
+    if s.cost.max_tokens_per_task == 0 {
+        errors.push(ValidationError::NonPositive {
+            field: "cost.max_tokens_per_task",
+            value: s.cost.max_tokens_per_task.to_string(),
+        });
+    }
+
+    if let Some(t) = s.agent.timeout_secs {
+        if t == 0 {
+            errors.push(ValidationError::NonPositive {
+                field: "agent.timeout_secs",
+                value: t.to_string(),
+            });
+        }
+    }
+
+    let ratio = s.cost.warn_at_ratio;
+    if !(0.0..=1.0).contains(&ratio) || ratio.is_nan() {
+        errors.push(ValidationError::OutOfRange {
+            field: "cost.warn_at_ratio",
+            value: ratio.to_string(),
+            min: 0.0,
+            max: 1.0,
+        });
+    }
+
+    for (i, pattern) in s.log.redaction_patterns.iter().enumerate() {
+        if let Err(e) = regex::Regex::new(pattern) {
+            errors.push(ValidationError::InvalidRegex {
+                field: "log.redaction_patterns",
+                index: i,
+                pattern: pattern.clone(),
+                reason: e.to_string(),
+            });
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+/// Load `Settings` by merging (in order): TOML file (if discovered) and env vars,
+/// then validate semantic constraints.
 ///
 /// - Missing config file: skipped, defaults are used.
 /// - Env vars are read with prefix `GOBAI_SETTINGS_` (e.g. `GOBAI_SETTINGS_CONFIRM_LEVEL=strict`).
-/// - Parse / type errors propagate as `figment::Error` for the caller to fail-fast on.
+/// - Parse / type errors return `SettingsError::Load`; semantic errors return `SettingsError::Validation`.
 #[allow(clippy::result_large_err)]
-pub fn load_settings() -> Result<Settings, figment::Error> {
+pub fn load_settings() -> Result<Settings, SettingsError> {
     let mut fig = Figment::new();
     if let Some(path) = discover_config_path() {
         fig = fig.merge(Toml::file(path));
     }
-    fig.merge(Env::prefixed("GOBAI_SETTINGS_")).extract()
+    let settings: Settings = fig.merge(Env::prefixed("GOBAI_SETTINGS_")).extract()?;
+    validate(&settings).map_err(SettingsError::Validation)?;
+    Ok(settings)
 }
 
 #[cfg(test)]
@@ -320,6 +474,100 @@ mod tests {
             jail.set_env("GOBAI_SETTINGS_CONFIRM_LEVEL", "autonomous");
             let s = load_settings().unwrap();
             assert_eq!(s.confirm_level, ConfirmLevel::Autonomous);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn validate_accepts_defaults() {
+        assert!(validate(&Settings::default()).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_zero_design_max() {
+        let mut s = Settings::default();
+        s.loop_.design_max = 0;
+        let errs = validate(&s).unwrap_err();
+        assert!(errs.iter().any(|e| matches!(
+            e,
+            ValidationError::NonPositive { field, .. } if *field == "loop.design_max"
+        )));
+    }
+
+    #[test]
+    fn validate_rejects_warn_at_ratio_above_one() {
+        let mut s = Settings::default();
+        s.cost.warn_at_ratio = 1.5;
+        let errs = validate(&s).unwrap_err();
+        assert!(errs.iter().any(|e| matches!(
+            e,
+            ValidationError::OutOfRange { field, .. } if *field == "cost.warn_at_ratio"
+        )));
+    }
+
+    #[test]
+    fn validate_rejects_warn_at_ratio_negative() {
+        let mut s = Settings::default();
+        s.cost.warn_at_ratio = -0.1;
+        let errs = validate(&s).unwrap_err();
+        assert!(errs.iter().any(|e| matches!(
+            e,
+            ValidationError::OutOfRange { field, .. } if *field == "cost.warn_at_ratio"
+        )));
+    }
+
+    #[test]
+    fn validate_rejects_invalid_regex() {
+        let mut s = Settings::default();
+        s.log.redaction_patterns = vec!["[invalid".to_string()];
+        let errs = validate(&s).unwrap_err();
+        assert!(matches!(
+            errs.first(),
+            Some(ValidationError::InvalidRegex { field, index: 0, .. })
+                if *field == "log.redaction_patterns"
+        ));
+    }
+
+    #[test]
+    fn validate_collects_multiple_errors() {
+        let mut s = Settings::default();
+        s.loop_.design_max = 0;
+        s.cost.warn_at_ratio = 2.0;
+        let errs = validate(&s).unwrap_err();
+        assert_eq!(errs.len(), 2);
+    }
+
+    #[test]
+    fn validate_skips_unset_optional_timeout() {
+        let mut s = Settings::default();
+        s.agent.timeout_secs = None;
+        assert!(validate(&s).is_ok());
+        s.agent.timeout_secs = Some(0);
+        assert!(validate(&s).is_err());
+    }
+
+    #[test]
+    fn load_settings_returns_validation_error_for_bad_toml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "config.toml",
+                r#"
+[loop]
+design_max = 0
+"#,
+            )?;
+            let path = jail.directory().join("config.toml");
+            jail.set_env(ENV_VAR, path.to_str().unwrap());
+            match load_settings() {
+                Err(SettingsError::Validation(errs)) => {
+                    assert!(errs.iter().any(|e| matches!(
+                        e,
+                        ValidationError::NonPositive { field, .. } if *field == "loop.design_max"
+                    )));
+                }
+                other => panic!("expected Validation error, got {other:?}"),
+            }
             Ok(())
         });
     }

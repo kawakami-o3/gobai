@@ -1416,6 +1416,7 @@ version = "0.1.0"
 dependencies = [
  "directories",
  "figment",
+ "regex",
  "serde",
  "serde_json",
  "tauri",
