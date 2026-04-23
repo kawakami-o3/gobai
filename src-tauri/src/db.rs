@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migration_creates_core_state_tables() {
+    async fn migrations_create_all_expected_tables() {
         let pool = init_in_memory_pool().await.unwrap();
         let rows: Vec<(String,)> = sqlx::query_as(
             "SELECT name FROM sqlite_master \
@@ -105,7 +105,15 @@ mod tests {
         let names: Vec<String> = rows.into_iter().map(|t| t.0).collect();
         assert_eq!(
             names,
-            vec!["phase_runs", "subtasks", "task_state_log", "tasks"]
+            vec![
+                "artifacts",
+                "intake_reports",
+                "messages",
+                "phase_runs",
+                "subtasks",
+                "task_state_log",
+                "tasks",
+            ]
         );
     }
 
