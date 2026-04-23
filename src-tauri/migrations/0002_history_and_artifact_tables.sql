@@ -5,14 +5,13 @@
 
 CREATE TABLE intake_reports (
     id INTEGER PRIMARY KEY,
-    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    task_id INTEGER NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
     clarifying_questions TEXT NOT NULL,    -- JSON 配列
     assumed_scope TEXT NOT NULL,           -- JSON {included, excluded, deferred}
     scope_warnings TEXT NOT NULL,          -- JSON 配列 (severity 付き)
     split_suggestions TEXT NOT NULL,       -- JSON 配列
     status TEXT NOT NULL                   -- draft | answered | approved
 );
-CREATE INDEX idx_intake_reports_task_id ON intake_reports(task_id);
 
 CREATE TABLE messages (
     id INTEGER PRIMARY KEY,
@@ -31,7 +30,7 @@ CREATE TABLE artifacts (
     id INTEGER PRIMARY KEY,
     phase_run_id INTEGER NOT NULL REFERENCES phase_runs(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,                    -- design_doc | review_result | diff | log
-    content_path TEXT NOT NULL,            -- 本文ファイルへのパス (Message と同名で揃える)
+    path TEXT NOT NULL,                    -- 本文ファイルへのパス (FR-12 / 03-04 docs 準拠)
     truncated INTEGER NOT NULL DEFAULT 0,
     content_purged_at TEXT
 );
