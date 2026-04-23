@@ -7,6 +7,10 @@ interface Settings {
 window.addEventListener("DOMContentLoaded", async () => {
   const el = document.querySelector("#settings-display");
   if (!el) return;
-  const s = await invoke<Settings>("get_settings");
-  el.textContent = `confirm_level: ${s.confirm_level}`;
+  try {
+    const s = await invoke<Settings>("get_settings");
+    el.textContent = `confirm_level: ${s.confirm_level}`;
+  } catch (e) {
+    el.textContent = `設定エラー: ${e}`;
+  }
 });
