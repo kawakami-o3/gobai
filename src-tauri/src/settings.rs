@@ -1,4 +1,6 @@
-use serde::Deserialize;
+use figment::providers::{Env, Format, Toml};
+use figment::Figment;
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -32,7 +34,7 @@ fn discover_with(env_value: Option<String>, config_dir: Option<&Path>) -> Option
     candidate.exists().then_some(candidate)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfirmLevel {
     Strict,
@@ -41,7 +43,7 @@ pub enum ConfirmLevel {
     Autonomous,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MinorPolicy {
     #[default]
@@ -50,7 +52,7 @@ pub enum MinorPolicy {
     PromptUser,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorktreeCleanup {
     #[default]
@@ -58,7 +60,7 @@ pub enum WorktreeCleanup {
     Remove,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LoopSettings {
     pub design_max: u32,
@@ -78,7 +80,7 @@ impl Default for LoopSettings {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CostSettings {
     pub max_api_calls_per_task: u32,
@@ -96,7 +98,7 @@ impl Default for CostSettings {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WorktreeSettings {
     pub cleanup_on_done: WorktreeCleanup,
@@ -116,7 +118,7 @@ impl Default for WorktreeSettings {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AgentSettings {
     pub codex_model: Option<String>,
@@ -126,7 +128,7 @@ pub struct AgentSettings {
     pub include_extra_summary_paths: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LogSettings {
     pub redaction_patterns: Vec<String>,
@@ -149,7 +151,7 @@ impl Default for LogSettings {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiSettings {
     pub theme: Option<String>,
@@ -157,7 +159,7 @@ pub struct UiSettings {
     pub notifications: Option<bool>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub confirm_level: ConfirmLevel,
@@ -169,6 +171,20 @@ pub struct Settings {
     pub agent: AgentSettings,
     pub log: LogSettings,
     pub ui: UiSettings,
+}
+
+/// Load `Settings` by merging (in order): TOML file (if discovered) and env vars.
+///
+/// - Missing config file: skipped, defaults are used.
+/// - Env vars are read with prefix `GOBAI_SETTINGS_` (e.g. `GOBAI_SETTINGS_CONFIRM_LEVEL=strict`).
+/// - Parse / type errors propagate as `figment::Error` for the caller to fail-fast on.
+#[allow(clippy::result_large_err)]
+pub fn load_settings() -> Result<Settings, figment::Error> {
+    let mut fig = Figment::new();
+    if let Some(path) = discover_config_path() {
+        fig = fig.merge(Toml::file(path));
+    }
+    fig.merge(Env::prefixed("GOBAI_SETTINGS_")).extract()
 }
 
 #[cfg(test)]
@@ -268,5 +284,43 @@ mod tests {
         assert_eq!(u.theme, None);
         assert_eq!(u.language, None);
         assert_eq!(u.notifications, None);
+    }
+
+    #[test]
+    fn load_returns_defaults_when_no_config_or_env() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            let s = load_settings().unwrap();
+            assert_eq!(s.confirm_level, ConfirmLevel::Normal);
+            assert_eq!(s.minor_policy, MinorPolicy::RecordAndContinue);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn load_reads_toml_file_via_env_var() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file("config.toml", r#"confirm_level = "strict""#)?;
+            let path = jail.directory().join("config.toml");
+            jail.set_env(ENV_VAR, path.to_str().unwrap());
+            let s = load_settings().unwrap();
+            assert_eq!(s.confirm_level, ConfirmLevel::Strict);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn env_var_overrides_toml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file("config.toml", r#"confirm_level = "strict""#)?;
+            let path = jail.directory().join("config.toml");
+            jail.set_env(ENV_VAR, path.to_str().unwrap());
+            jail.set_env("GOBAI_SETTINGS_CONFIRM_LEVEL", "autonomous");
+            let s = load_settings().unwrap();
+            assert_eq!(s.confirm_level, ConfirmLevel::Autonomous);
+            Ok(())
+        });
     }
 }
