@@ -1,5 +1,6 @@
 pub mod db;
 pub mod settings;
+pub mod state_transition;
 pub mod storage;
 
 use crate::settings::{load_settings, Settings};
