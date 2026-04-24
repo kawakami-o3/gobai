@@ -110,9 +110,12 @@ mod tests {
                 "intake_reports",
                 "messages",
                 "phase_runs",
+                "repo_summaries",
                 "subtasks",
                 "task_state_log",
                 "tasks",
+                "user_decisions",
+                "worktrees",
             ]
         );
     }
