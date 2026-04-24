@@ -26,6 +26,7 @@ directories = "5"
 figment = { version = "0.10", features = ["toml", "env"] }
 regex = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [dev-dependencies]
 tempfile = "3"
